@@ -1,0 +1,1 @@
+Light shows/signs with RGB LEDs.

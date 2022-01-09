@@ -3,81 +3,37 @@
 #define DATA_PIN 6
 #define BRIGHTNESS 255
 
+#define PTR(array) (&(array[0]))
+
+
 // hue is 0-255 (unlike inkscape, which is 0-360)
-CRGB cRed = CHSV(0, 255, 128);
-CRGB cBlindingWhite = CHSV(0, 0, 220);
-CRGB cWhite = CHSV(0, 0, 80);
-CRGB cDimWhite = CHSV(0, 0, 50);
-CRGB cGreen = CHSV(84, 255, 128);
-CRGB cDarkGreen = CHSV(84, 255, 50);
-CRGB cPink = CHSV(212, 255, 128);
-CRGB cCyan = CHSV(127, 255, 128);
-CRGB cYellow = CHSV(63, 255, 128);
-CRGB cOrange = CHSV(20, 255, 128);
-const CRGB blue(byte brightness) {
+CRGB
+    cRed = CHSV(0, 255, 128),
+    cPink = CHSV(212, 255, 128),
+    cBlindingWhite = CHSV(0, 0, 220),
+    cWhite = CHSV(0, 0, 80),
+    cDimWhite = CHSV(0, 0, 50),
+    cGreen = CHSV(84, 255, 128),
+    cDarkGreen = CHSV(84, 255, 50),
+    cBlue = CHSV(170, 255, 128),
+    cYellow = CHSV(63, 255, 128),
+    cCyan = CHSV(127, 255, 128),
+    cBlack = CRGB(0, 0, 0);
+CRGB
+    cLeftStripe = cYellow,
+    cRightStripe = cYellow;
+
+const CRGB blue(uint8_t brightness) {
     if (brightness <= 128) {
         return CHSV(170, 255, brightness);
     } else {
         return CHSV(170, 255 - (brightness - 128) * 2, 128);
     }
 }
-CRGB cBlue = CHSV(170, 255, 128);
-CRGB cBlues[4];
-CRGB cOpen[4];
-CRGB cFoot = CHSV(16, 100, 128);
-CRGB cEye = CHSV(63, 90, 88);
-CRGB cFace = CHSV(16, 100, 60);
-CRGB cBeak = CHSV(16, 100, 40);
-CRGB cOff = CHSV(0, 0, 0);
-
-CRGB cLeftBubbles[10];
-CRGB cRightBubbles[10];
-CRGB cWater[70];
-
-CRGB
-    *lb = &(cLeftBubbles[0]),
-    *le = &cCyan,
-    *lf = &cPink,
-    *ls = &cYellow,
-    *o = &(cOpen[0]),
-    *p = &(cOpen[1]),
-    *e = &(cOpen[2]),
-    *n = &(cOpen[3]),
-    *rb = &(cRightBubbles[0]),
-    *re = &cCyan,
-    *rf = &cPink,
-    *rs = &cYellow,
-    *water = &(cWater[0]),
-    *off = &cOff;
-
-typedef struct {
-    byte count;
-    CRGB** color;
-    byte colorInc;
-} ledRun;
-
-ledRun runs[] = {
-    {70, &water, 1},
-    {53, &rf, 0},
-    {10, &rs, 0},
-    { 3, &re, 0},
-    {10, &rb, 1},
-    { 1, &off, 0},
-    {25, &n, 0},
-    {21, &e, 0},
-    {19, &p, 0},
-    {19, &o, 0},
-    {10, &lb, 1},
-    { 1, &off, 0},
-    {48, &lf, 0},
-    { 3, &le, 0},
-    {24, &ls, 0},
-};
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof(a[0]))
 
 CRGB leds[NUM_LEDS];
-
 void setup() {
     memset8(leds, 0, NUM_LEDS * sizeof(CRGB));
     delay(1000);
@@ -85,65 +41,177 @@ void setup() {
     FastLED.setBrightness(BRIGHTNESS);
 }
 
-#define FLASH_FRAME_COUNT 8
-#define TIME_TO_FLASH ((loopCounter % FLASH_FRAME_COUNT) == 0)
 
-
-unsigned int loopCounter = 0;
-CRGB **open[] = {&o, &p, &e, &n};
-byte openPhase = 0;
-CRGB bubbleColors[] = {
-    CHSV(0, 0, 0),
-    cWhite,
-    CHSV(0, 0, 0),
+struct animationStop {
+    uint16_t frameCount;
+    CRGB toColor;
 };
+
+struct animationSequence {
+    uint8_t stopCount;
+    uint16_t frameCount;
+    int8_t offset;
+    struct animationStop *stops;
+};
+
+
+CRGB animate (struct animationSequence *seq, uint16_t time, uint16_t offset) {
+    uint8_t stopCount = seq->stopCount;
+    struct animationStop *stops = seq->stops;
+    uint16_t relTime = (time + offset * seq->offset) % seq->frameCount;
+    uint8_t stopI = 0;
+    while (relTime >= stops[stopI].frameCount) {
+        relTime -= stops[stopI].frameCount;
+        stopI += 1;
+    }
+    struct animationStop *prev = &(stops[(stopI + stopCount - 1) % stopCount]);
+    if (relTime == 0) {
+        return prev->toColor;
+    }
+    struct animationStop *cur = &(stops[stopI]);
+    return CRGB(
+        (((uint16_t)prev->toColor.r) * (cur->frameCount - relTime) + ((uint16_t)cur->toColor.r) * (relTime)) / cur->frameCount,
+        (((uint16_t)prev->toColor.g) * (cur->frameCount - relTime) + ((uint16_t)cur->toColor.g) * (relTime)) / cur->frameCount,
+        (((uint16_t)prev->toColor.b) * (cur->frameCount - relTime) + ((uint16_t)cur->toColor.b) * (relTime)) / cur->frameCount
+    );
+}
+
+
+#define ANIMATION(name, frameCount, seqOffset,...) struct animationStop name##Stops[] = __VA_ARGS__; struct animationSequence name##Seq {ARRAY_COUNT(name##Stops), frameCount, seqOffset, PTR(name##Stops)}; CRGB name (uint16_t time, uint16_t offset) { return animate(&name##Seq, time, offset); }
+
+CRGB solidColor (uint16_t time, uint16_t i, CRGB color) {
+    return color;
+}
+CRGB unused (uint16_t time, uint16_t i) {
+    return cBlack;
+}
+ANIMATION(leftBubbleQuick, 66, -4, {
+    {2, cWhite},
+    {2, cWhite},
+    {2, cBlack},
+    {60, cBlack},
+});
+ANIMATION(rightBubbleQuick, 77, -5, {
+    {2, cWhite},
+    {3, cWhite},
+    {2, cBlack},
+    {70, cBlack},
+});
+ANIMATION(rightBubbleSlow, 198, -11, {
+    {5, cWhite},
+    {5, cWhite},
+    {5, cBlack},
+    {183, cBlack},
+});
+ANIMATION(leftBubbleSlow, 207, -11, {
+    {5, cWhite},
+    {5, cWhite},
+    {5, cBlack},
+    {192, cBlack},
+});
+CRGB mergeMaxGrayscale (CRGB a, CRGB b) {
+    uint8_t value = a.r > b.r ? a.r : b.r;
+    return CRGB(value, value, value);
+}
+CRGB leftBubbles (uint16_t time, uint16_t i) {
+    return mergeMaxGrayscale(leftBubbleQuick(time, i), leftBubbleSlow(time, i));
+}
+CRGB rightBubbles (uint16_t time, uint16_t i) {
+    return mergeMaxGrayscale(rightBubbleQuick(time, i), rightBubbleSlow(time, i));
+}
+
+ANIMATION(slowRainbow, 120, -5, {
+    {40, CRGB(255, 0, 0)},
+    {40, CRGB(0, 255, 0)},
+    {40, CRGB(0, 0, 255)},
+});
+ANIMATION(rollingWink, 28, -4, {
+    {8, CHSV(0, 0, 0)},
+    {4, CHSV(0, 0, 255)},
+    {16, CHSV(0, 0, 255)},
+});
+CRGB OPEN (uint16_t time, uint16_t i, uint8_t letter) {
+    uint8_t bright = rollingWink(time, letter).r;
+    CRGB color = slowRainbow(time, letter);
+    return CRGB(
+        ((uint16_t)color.r) * bright / 255,
+        ((uint16_t)color.g) * bright / 255,
+        ((uint16_t)color.b) * bright / 255
+    );
+}
+ANIMATION(wave, 84, -6, {
+    {30, CRGB(80, 0, 0)},
+    {27, CRGB(20, 0, 0)},
+    {20, CRGB(140, 0, 0)},
+    {7, CRGB(20, 0, 0)},
+});
+CRGB water (uint16_t time, uint8_t pixel) {
+    uint8_t bright = wave(time, pixel).r + ((pixel + 2) % 5) * 23;
+    return blue(bright);
+}
+
+ANIMATION(rightFish, 53, 1, {
+    {11, CHSV(212, 255, 128)},
+    {11, CHSV(212, 255, 100)},
+    {11, CHSV(212, 255, 128)},
+    {10, CHSV(232, 255, 128)},
+    {10, CHSV(232, 255, 100)},
+});
+
+ANIMATION(leftFish, 48, 1, {
+    { 9, CHSV(212, 255, 128)},
+    { 9, CHSV(212, 255, 100)},
+    {10, CHSV(212, 255, 128)},
+    {10, CHSV(232, 255, 128)},
+    {10, CHSV(232, 255, 100)},
+});
+
+ANIMATION(leftWink, 267, 0, {
+    { 255, cCyan},
+    { 0, cBlack},
+    { 2, cBlack},
+    { 2, cCyan},
+    { 4, cCyan},
+    { 0, cBlack},
+    { 2, cBlack},
+    { 2, cCyan},
+});
+
+ANIMATION(rightWink, 387, 0, {
+    { 165, cCyan},
+    { 210, cCyan},
+    { 0, cBlack},
+    { 2, cBlack},
+    { 2, cCyan},
+    { 4, cCyan},
+    { 0, cBlack},
+    { 2, cBlack},
+    { 2, cCyan},
+});
+
+#define RUNS_START { static uint16_t loopCounter = 1000; uint16_t ledI = 0;
+#define RUNS_END ++loopCounter;}
+#define RUN(ledCount, fn, ...) for (uint16_t i = 0; i < ledCount; ++i) { leds[ledI++] = fn(loopCounter, i, ##__VA_ARGS__); }
+
 void loop() {
-    // bubbles
-    #define LBM 57
-    for (byte i = 0; i < 10; ++i) {
-        unsigned int phase = loopCounter % LBM;
-        cLeftBubbles[i] = (i == (phase * 10) / LBM) ? cWhite : cOff;
-    }
-    #define RBM 49
-    for (byte i = 0; i < 10; ++i) {
-        unsigned int phase = loopCounter % RBM;
-        cRightBubbles[i] = (i == (phase * 10) / RBM) ? cWhite : cOff;
-    }
-
-    // waves
-    for (byte i = 0; i < ARRAY_COUNT(cWater); ++i) {
-        cWater[i] = blue(
-            30 + // min brightness
-            ((7 + i) % 5) * 30 + // brighten based on height
-            ((loopCounter - 5 * i) % 50) * 2 // brighten based on timing
-        );
-    }
-
-
-    // "OPEN": rainbow/caterpiler
-    for (byte i = 0; i < 4; ++i) {
-        unsigned int lci = loopCounter - i * 5;
-        unsigned int bright = lci % 32;
-        if (bright < 8) {
-            bright = 16 - 2 * bright;
-        } else if (bright < 12) {
-            bright = (bright - 8) * 4;
-        } else {
-            bright = 16;
-        }
-        cOpen[i] = CHSV(lci - openPhase * 50, 255, 31 + bright * 14);
-    }
-
-    // set the led colors according to the areas
-    for (unsigned int runI = 0, ledI = 0; runI < ARRAY_COUNT(runs); ++runI) {
-        ledRun *run = &(runs[runI]);
-        for (int i = 0, colorI = 0; i < run->count; ++i, ++ledI, colorI += run->colorInc) {
-            leds[ledI] = (*(run->color))[colorI];
-        }
-    }
+    RUNS_START
+        RUN(70, water);
+        RUN(53, rightFish);
+        RUN(10, solidColor, cRightStripe);
+        RUN( 3, rightWink);
+        RUN(10, rightBubbles);
+        RUN( 1, unused);
+        RUN(25, OPEN, 3); // N
+        RUN(21, OPEN, 2); // E
+        RUN(19, OPEN, 1); // P
+        RUN(19, OPEN, 0); // O
+        RUN(10, leftBubbles);
+        RUN( 1, unused);
+        RUN(48, leftFish);
+        RUN( 3, leftWink);
+        RUN(24, solidColor, cLeftStripe);
+    RUNS_END
 
     FastLED.show();
-
-    loopCounter += 1;
-    delay(11);
+    // delay(4);
 }
